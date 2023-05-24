@@ -49,14 +49,25 @@ class MyNode(wsp.Node):
         yield self.timeout(1)
         self.sim.env.process(self.steady_phase())
 
+
     def steady_phase(self):
         if self.status == Status.MEMBER:
             # self.scene.clearlinks()
-            seq = 0
+            seq = 1
             while True:
-                self.send_data_to_CH(self.id, seq)
+                self.send_data_to_CH('data', self.id, seq)
                 seq += 1
                 yield self.timeout(1)
+
+            # seq += 1
+            # self.send_data_to_CH('info', self.id, seq)
+        elif self.status == Status.UNDEFINED:
+            self.log(f'Resetup')
+            self.chsv_neighbors = []
+            self.chsv_point = 1000
+            self.cluster_head = None
+            self.members = None
+            self.sim.env.process(self.setup_phase())
 
     ###################
 
@@ -107,9 +118,9 @@ class MyNode(wsp.Node):
         self.send(self.cluster_head, msg='CH_ACK', src=self.id)
 
     ###################
-    def send_data_to_CH(self, src, seq):
+    def send_data_to_CH(self, msg, src, seq, **kwargs):
         self.log(f"Send data to {SINK_NODE} (via {self.cluster_head}) - seq {seq}")
-        self.send(self.cluster_head, msg='data', src=src, seq=seq)
+        self.send(self.cluster_head, msg=msg, src=src, seq=seq, **kwargs)
 
     def send_data_to_sink(self, msg, src, seq):
         self.log(f"Forward data from {src} to {SINK_NODE} - seq {seq}")
@@ -121,11 +132,11 @@ class MyNode(wsp.Node):
     ###################
     def on_receive(self, sender, msg, src, **kwargs):
 
-        if msg == 'hello' and self.id != SINK_NODE:
+        if msg == 'hello' and self.status == Status.UNDEFINED:
             self.log(f'Receive CHSV message from {src}, chsv: {kwargs["chsv"]}')
             self.chsv_neighbors.append(kwargs['chsv'])
 
-        elif msg == 'CH' and self.id != SINK_NODE:
+        elif msg == 'CH' and self.status == Status.UNDEFINED:
             self.log(f'Receive CH message from {src}')
             if self.status == Status.UNDEFINED:
                 self.sim.env.process(self.switch_state(Status.MEMBER))
@@ -134,7 +145,7 @@ class MyNode(wsp.Node):
                 self.send_CH_ack()
                 self.scene.addlink(sender, self.id, "CH")
 
-        elif msg == 'CH_ACK' and self.id != SINK_NODE:
+        elif msg == 'CH_ACK':
             self.log(f'Receive CH ACK message from {src}')
             if self.status == Status.CLUSTER_HEAD:
                 self.members.append(src)
@@ -147,11 +158,15 @@ class MyNode(wsp.Node):
                 seq = kwargs['seq']
                 self.log(f"Got data from {sender} (source: {src}) - seq {seq}")
 
+        elif msg == 'info':
+            # self.log(f"{kwargs['num_neighbors']}")
+            self.log(f"{len(self.members)}")
+
     def distance(self, p0, p1):
         return math.sqrt((p0[0] - p1[0]) ** 2 + (p0[1] - p1[1]) ** 2)
 ###########################################################
 sim = wsp.Simulator(
-        until=100,
+        until=50,
         timescale=1,
         visual=True,
         terrain_size=(700,700),
@@ -165,7 +180,10 @@ for x in range(6):
         px = 50 + x*100 + random.uniform(-40, 40)
         py = 50 + y*100 + random.uniform(-40, 40)
         node = sim.add_node(MyNode, (px, py))
+        node.max_range = 500
+        node.min_range = 10
         node.tx_range = 150
+
         node.logging = True
 
 SINK_NODE = 36
