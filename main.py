@@ -4,7 +4,6 @@ import wsnsimpy.wsnsimpy_tk as wsp
 import enum
 
 BROADCAST_DELAY = .1
-SCALE_TIME = 3
 
 class Status(enum.Enum):
     UNDEFINED = 0
@@ -15,26 +14,26 @@ class Status(enum.Enum):
 class MyNode(wsp.Node):
     tx_range = 100
 
-    def scale_timeout(self, delay):
-        return self.timeout(delay * SCALE_TIME)
-
     ###################
     def init(self):
         super().init()
         self.status = Status.UNDEFINED
-        self.chsv_neighbors = []
+        self.chsv_neighbors = {}
         self.chsv_point = 1000
         self.pin = 1000
         ############
-        self.cluster_head = None
+        self.cluster_heads = None
+        self.cluster_head_official = None
         self.members = None
 
     def reset(self):
         self.status = Status.UNDEFINED
-        self.chsv_neighbors = []
+        self.chsv_neighbors = {}
         self.chsv_point = 1000
-        self.cluster_head = None
-        self.members = None
+        self.cluster_heads = []
+        self.cluster_head_official = None
+        self.members = []
+        self.cluster_neighbors = {}
 
     ###################
     def run(self):
@@ -49,18 +48,18 @@ class MyNode(wsp.Node):
     ###################
     def setup_phase(self):
         self.chsv_point = self.calculate_chsv()
-        yield self.scale_timeout(BROADCAST_DELAY)
+        yield self.timeout(BROADCAST_DELAY)
         self.send(wsp.BROADCAST_ADDR, msg='Hello', src=self.id, chsv=self.chsv_point)
 
-        yield self.scale_timeout(.5)
+        yield self.timeout(.5)
 
-        if len(self.chsv_neighbors) == 0 or self.chsv_point >= max(self.chsv_neighbors):
+        if len(self.chsv_neighbors) == 0 or self.chsv_point >= max(self.chsv_neighbors.values()):
             self.switch_state(Status.CLUSTER_HEAD)
             self.log(f'Start broadcast CH message')
-            yield self.scale_timeout(BROADCAST_DELAY)
+            yield self.timeout(BROADCAST_DELAY)
             self.send(wsp.BROADCAST_ADDR, msg='I am Cluster Head', src=self.id)
 
-        yield self.scale_timeout(.5)
+        yield self.timeout(.5)
 
         self.sim.env.process(self.steady_phase())
 
@@ -69,49 +68,73 @@ class MyNode(wsp.Node):
         if self.status == Status.MEMBER:
             # self.scene.clearlinks()
             seq = 0
-            while seq < 3:
-                yield self.scale_timeout(BROADCAST_DELAY)
-                self.log(f"Send data to {SINK_NODE} (via {self.cluster_head}) - seq {seq}")
-                self.send(self.cluster_head, msg='Data', src=self.id, seq=seq)
-
+            yield self.timeout(BROADCAST_DELAY)
+            self.send(wsp.BROADCAST_ADDR, msg="My cluster heads", src=self.id, cluster_heads=self.cluster_heads)
+            while seq < 2:
+                yield self.timeout(BROADCAST_DELAY + random.uniform(0.1, 0.7))
+                # self.log(f"Send data to {SINK_NODE} (via {self.cluster_head_official}) - seq {seq}")
+                self.send(self.cluster_head_official, msg='Data', src=self.id, seq=seq)
                 seq += 1
-                yield self.scale_timeout(random.uniform(0.1, 0.7))
+
         elif self.status == Status.CLUSTER_HEAD:
             seq = 0
-            self.data = ''
-            yield self.scale_timeout(2)
-            self.send_data_to_sink(msg='Data', src=self.id, seq=seq, data=self.data)
+            self.data_combine = ''
+            yield self.timeout(2)
+            self.send_data_to_sink(msg='Data', src=self.id, seq=seq, data=self.data_combine)
             seq += 1
-            self.send_data_to_sink(msg='Cluster information', src=self.id, seq=seq, data=self.members)
-        elif self.status == Status.UNDEFINED:
-            self.log('Status undefined -> Self-promoted to Cluster head')
-            self.switch_state(Status.CLUSTER_HEAD)
-            self.sim.env.process(self.steady_phase())
+            # self.log(f"Members: {self.members}\nCluster neighbors: {self.cluster_neighbors}")
+
+            # self.send_data_to_sink(msg='Cluster information', src=self.id, seq=seq, data=self.members)
+        # elif self.status == Status.UNDEFINED:
+        #     # self.log('Status undefined -> Self-promoted to Cluster head')
+        #     self.switch_state(Status.CLUSTER_HEAD)
+        #     self.sim.env.process(self.steady_phase())
 
     ###################
     def on_receive(self, sender, msg, src, **kwargs):
 
-        if msg == 'Hello' and self.status == Status.UNDEFINED:
+        if msg == 'Hello' and self.status == Status.UNDEFINED and self.id != SINK_NODE:
             self.log(f'Receive CHSV message from {src}, chsv: {kwargs["chsv"]}')
-            self.chsv_neighbors.append(kwargs['chsv'])
+            self.chsv_neighbors[src] = kwargs['chsv']
 
-        elif msg == 'I am Cluster Head' and self.status == Status.UNDEFINED:
-            self.log(f'Receive CH message from {src}')
-            self.switch_state(Status.MEMBER)
-            self.cluster_head = src
-            yield self.scale_timeout(BROADCAST_DELAY)
-            self.send(self.cluster_head, msg='CH_ACK', src=self.id)
-            self.scene.addlink(sender, self.id, "CH")
+        elif msg == 'I am Cluster Head' and self.id != SINK_NODE:
+            if self.status == Status.UNDEFINED:
+                self.switch_state(Status.MEMBER)
+                self.cluster_heads.append(src)
+                self.cluster_head_official = src
+                yield self.timeout(BROADCAST_DELAY)
+                self.send(wsp.BROADCAST_ADDR, msg='I am Cluster Member', src=self.id, cluster_head=self.cluster_head_official)
+            elif self.status == Status.MEMBER:
+                self.cluster_heads.append(src)
 
-        elif msg == 'CH_ACK':
-            self.log(f'Receive CH ACK message from {src}')
+        elif msg == 'I am Cluster Member' and self.id != SINK_NODE:
             if self.status == Status.CLUSTER_HEAD:
-                self.members.append(src)
+                if self.id == kwargs['cluster_head']:
+                    self.members.append(src)
+                    self.scene.addlink(sender, self.id, "CH")
+            elif self.status == Status.UNDEFINED:
+                if sender in self.chsv_neighbors:
+                    del self.chsv_neighbors[sender]
 
+                if len(self.chsv_neighbors) == 0 or self.chsv_point >= max(self.chsv_neighbors.values()):
+                    self.switch_state(Status.CLUSTER_HEAD)
+                    # self.log(f'Start broadcast CH message')
+                    yield self.timeout(BROADCAST_DELAY)
+                    self.send(wsp.BROADCAST_ADDR, msg='I am Cluster Head', src=self.id)
+        elif msg == "My cluster heads" and self.id != SINK_NODE:
+            if self.status == Status.CLUSTER_HEAD:
+                heads = kwargs['cluster_heads']
+                for h in heads:
+                    if h != self.id:
+                        if h in self.cluster_neighbors:
+                            self.cluster_neighbors[h].append(src)
+                        else:
+                            self.scene.addlink(h, src, "GW")
+                            self.cluster_neighbors[h] = [src]
         elif msg == 'Data':
             if self.status == Status.CLUSTER_HEAD:
                 seq = kwargs['seq']
-                self.data += f'\nSource {src}: seq {seq}'
+                self.data_combine += f'\nSource {src}: seq {seq}'
             elif self.id == SINK_NODE:
                 seq = kwargs['seq']
                 data = kwargs['data']
@@ -123,23 +146,25 @@ class MyNode(wsp.Node):
     ###################
     def switch_state(self, status: Status):
         if status == Status.CLUSTER_HEAD:
-            self.log(f'Set status to Cluster Head')
+            # self.log(f'Set status to Cluster Head')
             self.status = Status.CLUSTER_HEAD
             self.members = []
+            self.cluster_neighbors = {}
             self.scene.nodecolor(self.id, 0, 1, 0)
             self.scene.nodewidth(self.id, 2)
-            self.scene.circle(
-                self.pos[0], self.pos[1],
-                self.tx_range)
+            # self.scene.circle(
+            #     self.pos[0], self.pos[1],
+            #     self.tx_range)
         elif status == Status.MEMBER:
-            self.log(f'Set status to Member')
+            # self.log(f'Set status to Member')
             self.status = Status.MEMBER
+            self.cluster_heads = []
             self.scene.nodecolor(self.id, 1, 0, 0)
             self.scene.nodewidth(self.id, 2)
 
     ###################
     def send_data_to_sink(self, msg, src, **kwargs):
-        self.log(f"Forward data from {src} to {SINK_NODE} - seq {kwargs['seq']}")
+        # self.log(f"Forward data from {src} to {SINK_NODE} - seq {kwargs['seq']}")
         old_tx_range = self.tx_range
         self.tx_range = self.distance(self.pos, SINK_POS)
         self.send(SINK_NODE, msg=msg, src=src, **kwargs)
@@ -164,18 +189,19 @@ class MyNode(wsp.Node):
 ###########################################################
 sim = wsp.Simulator(
         until=50,
-        timescale=1,
+        timescale=3,
         visual=True,
         terrain_size=(700, 700),
         title="Cluster based demo")
 
 # line style for member links
-sim.scene.linestyle("CH", color=(0,.8,0), arrow="tail", width=0.5)
+sim.scene.linestyle("CH", color=(0, 0, 0.8), width=0.5)
+sim.scene.linestyle("GW", color=(.8, .8, 0), width=1)
 
 for x in range(6):
     for y in range(6):
-        px = 50 + x*100 + random.uniform(-45, 45)
-        py = 50 + y*100 + random.uniform(-45, 45)
+        px = 60 + x*100 + random.uniform(-40, 40)
+        py = 60 + y*100 + random.uniform(-40, 40)
         node = sim.add_node(MyNode, (px, py))
         node.max_range = 500
         node.min_range = 10
@@ -184,7 +210,7 @@ for x in range(6):
         node.logging = True
 
 SINK_NODE = 36
-SINK_POS = (680, 680)
+SINK_POS = (620, 620)
 
 sink_node = sim.add_node(MyNode, SINK_POS)
 sink_node.tx_range = 0
