@@ -70,19 +70,20 @@ class MyNode(wsp.Node):
             seq = 0
             yield self.timeout(BROADCAST_DELAY)
             self.send(wsp.BROADCAST_ADDR, msg="My cluster heads", src=self.id, cluster_heads=self.cluster_heads)
+            self.log(f"Cluster head: {self.cluster_heads}")
             while seq < 2:
                 yield self.timeout(BROADCAST_DELAY + random.uniform(0.1, 0.7))
                 # self.log(f"Send data to {SINK_NODE} (via {self.cluster_head_official}) - seq {seq}")
-                self.send(self.cluster_head_official, msg='Data', src=self.id, seq=seq)
+                # self.send(self.cluster_head_official, msg='Data', src=self.id, seq=seq)
                 seq += 1
 
         elif self.status == Status.CLUSTER_HEAD:
             seq = 0
             self.data_combine = ''
             yield self.timeout(2)
-            self.send_data_to_sink(msg='Data', src=self.id, seq=seq, data=self.data_combine)
+            # self.send_data_to_sink(msg='Data', src=self.id, seq=seq, data=self.data_combine)
             seq += 1
-            # self.log(f"Members: {self.members}\nCluster neighbors: {self.cluster_neighbors}")
+            self.log(f"Members: {self.members}\nCluster neighbors: {self.cluster_neighbors}")
 
             # self.send_data_to_sink(msg='Cluster information', src=self.id, seq=seq, data=self.members)
         # elif self.status == Status.UNDEFINED:
@@ -129,8 +130,8 @@ class MyNode(wsp.Node):
                         if h in self.cluster_neighbors:
                             self.cluster_neighbors[h].append(src)
                         else:
-                            self.scene.addlink(h, src, "GW")
                             self.cluster_neighbors[h] = [src]
+                        self.scene.addlink(h, src, "GW")
         elif msg == 'Data':
             if self.status == Status.CLUSTER_HEAD:
                 seq = kwargs['seq']
@@ -152,9 +153,9 @@ class MyNode(wsp.Node):
             self.cluster_neighbors = {}
             self.scene.nodecolor(self.id, 0, 1, 0)
             self.scene.nodewidth(self.id, 2)
-            # self.scene.circle(
-            #     self.pos[0], self.pos[1],
-            #     self.tx_range)
+            self.scene.circle(
+                self.pos[0], self.pos[1],
+                self.tx_range)
         elif status == Status.MEMBER:
             # self.log(f'Set status to Member')
             self.status = Status.MEMBER
@@ -195,8 +196,8 @@ sim = wsp.Simulator(
         title="Cluster based demo")
 
 # line style for member links
-sim.scene.linestyle("CH", color=(0, 0, 0.8), width=0.5)
-sim.scene.linestyle("GW", color=(.8, .8, 0), width=1)
+sim.scene.linestyle("CH", color=(0.5, 0.5, 0), width=0.5)
+sim.scene.linestyle("GW", color=(1, 0, 1), width=2)
 
 for x in range(6):
     for y in range(6):
@@ -205,7 +206,7 @@ for x in range(6):
         node = sim.add_node(MyNode, (px, py))
         node.max_range = 500
         node.min_range = 10
-        node.tx_range = 150
+        node.tx_range = 130
 
         node.logging = True
 
