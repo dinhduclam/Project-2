@@ -2,6 +2,7 @@ import math
 import random
 import wsnsimpy.wsnsimpy_tk as wsp
 import enum
+import  numpy as np
 
 BROADCAST_DELAY = .1
 
@@ -274,9 +275,14 @@ class MyNode(wsp.Node):
 
         for distance in self.neighbor_distance_list:
             if distance[0] <= self.tx_range:
-                z = 7 * random.uniform(0, 1)
-                b = -50 - 37.6 * math.log10(distance[0]) + z
-                snr = b / 94
+                z = 7 * np.random.uniform(0, 1)
+                if distance[0] < 50:
+                    b = -30.18 - 26*math.log10(distance[0])
+                else:
+                    b = -100 - 37.6 * math.log10(distance[0] / 1000) + z
+
+                snr = b + 64
+                snr = 10**(snr/10)
                 self.log(snr)
                 sum_snr += snr
 
