@@ -2,7 +2,7 @@ import math
 import random
 import wsnsimpy.wsnsimpy_tk as wsp
 import enum
-import  numpy as np
+import numpy as np
 
 BROADCAST_DELAY = .1
 
@@ -172,10 +172,11 @@ class MyNode(wsp.Node):
                     return
                 if (src in self.route_to_sink) and (hop_count >= self.route_to_sink[src]):
                     return
-                self.route_to_sink[src] = hop_count + 1
+                self.route_to_sink[src] = hop_count
                 self.scene.addlink(self.id, src, "SINK")
+                path = path.copy()
                 path.append(self.id)
-                self.log(path)
+
                 for node in self.cluster_adjacency.keys():
                     self.send_to_cluster_adjacency(msg=Message.ROUTE_TO_SINK, src=self.id,
                                                    chdest=node, hop_count=hop_count + 1, path=path)
@@ -275,15 +276,14 @@ class MyNode(wsp.Node):
 
         for distance in self.neighbor_distance_list:
             if distance[0] <= self.tx_range:
-                z = 7 * np.random.uniform(0, 1)
-                if distance[0] < 50:
-                    b = -30.18 - 26*math.log10(distance[0])
-                else:
-                    b = -100 - 37.6 * math.log10(distance[0] / 1000) + z
+                z = z_samples[self.id * distance[1].id]
+
+                b = -100 - 37.6 * math.log10(distance[0] / 1000)
+                if distance[0] > 50:
+                    b += z
 
                 snr = b + 64
                 snr = 10**(snr/10)
-                self.log(snr)
                 sum_snr += snr
 
         chsv_point *= sum_snr
@@ -328,5 +328,7 @@ SINK_POS = (610, 610)
 sink_node = sim.add_node(MyNode, SINK_POS)
 sink_node.tx_range = 150
 sink_node.logging = True
+
+z_samples = np.random.normal(0, 7, 36*36)
 
 sim.run()
