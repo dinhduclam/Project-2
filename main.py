@@ -50,7 +50,6 @@ class MyNode(wsp.Node):
         self.psv_neighbors = {}
         self.chsv_point = 1000
         self.psv_point = 1000
-        # self.pin = 1000
         ############
         # for member
         self.cluster_heads = []
@@ -89,7 +88,7 @@ class MyNode(wsp.Node):
     def steady_phase(self):
         if self.id is SINK_NODE:
             for node in self.cluster_heads:
-                self.send(node, msg=Message.ROUTE_TO_SINK, src=self.id, hop_count=1, path=[SINK_NODE], snr=0)
+                self.send(node, msg=Message.ROUTE_TO_SINK, src=self.id, hop_count=0, path=[SINK_NODE], snr=0)
 
         elif self.status == Status.MEMBER:
             # self.scene.clearlinks()
@@ -166,22 +165,8 @@ class MyNode(wsp.Node):
                     self.data_combine = ""
 
             elif msg == Message.ROUTE_TO_SINK:
-                # hop_count = kwargs["hop_count"]
-                # path = kwargs["path"]
-                # if self.id in path:
-                #     return
-                # if (src in self.route_to_sink) and (hop_count >= self.route_to_sink[src]):
-                #     return
-                # self.route_to_sink[src] = hop_count
-                # self.scene.addlink(self.id, src, "SINK")
-                # path = path.copy()
-                # path.append(self.id)
-                #
-                # for node in self.cluster_adjacency.keys():
-                #     self.send_to_cluster_adjacency(msg=Message.ROUTE_TO_SINK, src=self.id,
-                #                                    chdest=node, hop_count=hop_count + 1, path=path)
-
                 path = kwargs["path"]
+                hop_count = kwargs["hop_count"] + 1
                 snr = kwargs["snr"] + snr_value[sender][self.id]
                 if self.id in path:
                     return
@@ -191,12 +176,13 @@ class MyNode(wsp.Node):
                 self.scene.addlink(self.id, src, "SINK")
                 path = path.copy()
                 path.append(self.id)
+                self.log(hop_count)
                 self.log(snr)
                 self.log(path)
 
                 for node in self.cluster_adjacency.keys():
                     self.send_to_cluster_adjacency(msg=Message.ROUTE_TO_SINK, src=self.id,
-                                                   chdest=node, snr=snr, path=path)
+                                                   chdest=node, hop_count=hop_count, snr=snr, path=path)
 
         elif self.status is Status.MEMBER:
             if msg == Message.I_AM_CLUSTER_HEAD:
@@ -212,6 +198,7 @@ class MyNode(wsp.Node):
             elif msg == Message.ROUTE_TO_SINK:
                 dest = kwargs["chdest"]
                 kwargs["snr"] += snr_value[sender][self.id]
+                kwargs["hop_count"] += 1
                 yield self.timeout(BROADCAST_DELAY)
                 self.send(dest, msg=msg, src=src, **kwargs)
         elif self.status is Status.UNDEFINED:
@@ -277,6 +264,8 @@ class MyNode(wsp.Node):
 
     def send_to_cluster_adjacency(self, msg, src, chdest, **kwargs):
         min_snr = 1000
+        best_gw = self.cluster_adjacency[chdest][0]
+
         for gw in self.cluster_adjacency[chdest]:
             if min_snr > snr_value[src][gw] + snr_value[gw][chdest]:
                 min_snr = snr_value[src][gw] + snr_value[gw][chdest]
@@ -308,11 +297,13 @@ class MyNode(wsp.Node):
                 snr = b + 64
                 snr = 10**(snr/10)
                 snr_value[self.id][distance[1].id] = b
-                self.log(b)
+
                 sum_snr += snr
 
         chsv_point *= sum_snr
 
+        if self.id == 35:
+            chsv_point *= 10
         return chsv_point
 
     def distance(self, p0, p1):
