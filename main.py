@@ -27,7 +27,7 @@ class MyNode(wsp.Node):
     psv_neighbors = {}
     chsv_point = 0
     psv_point = 0
-    # self.pin = 1000
+    pin = 1000
     ############
     # for member
     cluster_heads = []
@@ -62,6 +62,24 @@ class MyNode(wsp.Node):
 
     ###################
     def run(self):
+        self.round = 0
+        self.round_time = 4
+
+        while self.round < 4:
+            self.round += 1
+            self.complete_round(self.sim.now)
+
+
+
+    def complete_round(self, start_time):
+
+        self.sim.env.process(self.start_round(start_time))
+        self.sim.env.run(until= start_time + self.round_time)
+        self.switch_state(Status.UNDEFINED)
+        self.change_pos()
+
+    def start_round(self, start_time):
+        self.log(self.round)
         if self.id is SINK_NODE:
             self.scene.nodecolor(self.id, 0, 0, 0)
             self.scene.nodewidth(self.id, 2)
@@ -69,37 +87,38 @@ class MyNode(wsp.Node):
         else:
             self.scene.nodecolor(self.id, 0.7, 0.7, 0.7)
             self.sim.env.process(self.setup_phase())
-            self.sim.env.run(until=1)
+            self.sim.env.run(until=start_time+1)
+
         self.sim.env.process(self.steady_phase())
 
     ###################
     def setup_phase(self):
         self.chsv_point = self.calculate_chsv()
         yield self.timeout(BROADCAST_DELAY)
-        self.send(wsp.BROADCAST_ADDR, msg=Message.NODE_RESIDUAL, src=self.id, chsv=self.chsv_point)
+        self.send_with_battery_included(wsp.BROADCAST_ADDR, msg=Message.NODE_RESIDUAL, src=self.id, chsv=self.chsv_point)
 
         yield self.timeout(.2)
 
         if len(self.chsv_neighbors) == 0 or self.chsv_point >= max(self.chsv_neighbors.values()):
             self.switch_state(Status.CLUSTER_HEAD)
             yield self.timeout(BROADCAST_DELAY)
-            self.send(wsp.BROADCAST_ADDR, msg=Message.I_AM_CLUSTER_HEAD, src=self.id)
+            self.send_with_battery_included(wsp.BROADCAST_ADDR, msg=Message.I_AM_CLUSTER_HEAD, src=self.id)
 
     def steady_phase(self):
         if self.id is SINK_NODE:
             for node in self.cluster_heads:
-                self.send(node, msg=Message.ROUTE_TO_SINK, src=self.id, hop_count=0, path=[SINK_NODE], snr=0)
+                self.send_with_battery_included(node, msg=Message.ROUTE_TO_SINK, src=self.id, hop_count=0, path=[SINK_NODE], snr=0)
 
         elif self.status == Status.MEMBER:
             # self.scene.clearlinks()
             seq = 0
             yield self.timeout(BROADCAST_DELAY)
-            self.send(wsp.BROADCAST_ADDR, msg="My cluster heads", src=self.id, cluster_heads=self.cluster_heads)
+            self.send_with_battery_included(wsp.BROADCAST_ADDR, msg="My cluster heads", src=self.id, cluster_heads=self.cluster_heads)
             self.log(f"Cluster head: {self.cluster_heads}")
             # while True:
             #     yield self.timeout(BROADCAST_DELAY + random.uniform(0.1, 0.7))
             #     # self.log(f"Send data to {SINK_NODE} (via {self.cluster_head_official}) - seq {seq}")
-            #     self.send(self.cluster_head_official, msg='Data', src=self.id, seq=seq)
+            #     self.send_with_battery_included(self.cluster_head_official, msg='Data', src=self.id, seq=seq)
             #     seq += 1
 
         elif self.status == Status.CLUSTER_HEAD:
@@ -109,18 +128,17 @@ class MyNode(wsp.Node):
 
             self.log(self.route_to_sink)
 
-            while True:
+            while seq < 1:
                 seq += 1
                 if len(self.route_to_sink) == 0:
                     pass
-                elif self.id < 10:
+                elif self.id < 17:
                     self.timeout(BROADCAST_DELAY + random.uniform(0.1, 0.4))
                     self.send_back_to_sink(msg='Data_Combine', src=self.id,
                                            seq=seq, data=self.data_combine)
+                    self.data_combine = ''
+                yield self.timeout(0.6)
 
-                self.data_combine = ''
-                yield self.timeout(1.5)
-        # yield self.switch_state(Status.UNDEFINED)
 
     ###################
     def on_receive(self, sender, msg, src, **kwargs):
@@ -176,9 +194,6 @@ class MyNode(wsp.Node):
                 self.scene.addlink(self.id, src, "SINK")
                 path = path.copy()
                 path.append(self.id)
-                self.log(hop_count)
-                self.log(snr)
-                self.log(path)
 
                 for node in self.cluster_adjacency.keys():
                     self.send_to_cluster_adjacency(msg=Message.ROUTE_TO_SINK, src=self.id,
@@ -190,17 +205,17 @@ class MyNode(wsp.Node):
             elif msg == Message.CLUSTER_HEAD_RESIDUAL:
                 dest = kwargs["chdest"]
                 yield self.timeout(BROADCAST_DELAY)
-                self.send(dest, msg=msg, src=src, **kwargs)
+                self.send_with_battery_included(dest, msg=msg, src=src, **kwargs)
             elif msg == "Data_Combine":
                 dest = kwargs["chdest"]
                 yield self.timeout(BROADCAST_DELAY)
-                self.send(dest, msg=msg, src=src, **kwargs)
+                self.send_with_battery_included(dest, msg=msg, src=src, **kwargs)
             elif msg == Message.ROUTE_TO_SINK:
                 dest = kwargs["chdest"]
                 kwargs["snr"] += snr_value[sender][self.id]
                 kwargs["hop_count"] += 1
                 yield self.timeout(BROADCAST_DELAY)
-                self.send(dest, msg=msg, src=src, **kwargs)
+                self.send_with_battery_included(dest, msg=msg, src=src, **kwargs)
         elif self.status is Status.UNDEFINED:
             if msg == Message.NODE_RESIDUAL:
                 self.chsv_neighbors[src] = kwargs['chsv']
@@ -209,7 +224,7 @@ class MyNode(wsp.Node):
                 self.cluster_heads.append(src)
                 self.cluster_head_official = src
                 yield self.timeout(BROADCAST_DELAY)
-                self.send(wsp.BROADCAST_ADDR, msg=Message.I_AM_CLUSTER_MEMBER, src=self.id,
+                self.send_with_battery_included(wsp.BROADCAST_ADDR, msg=Message.I_AM_CLUSTER_MEMBER, src=self.id,
                           cluster_head=self.cluster_head_official)
             elif msg == Message.I_AM_CLUSTER_MEMBER:
                 if sender in self.chsv_neighbors:
@@ -218,7 +233,7 @@ class MyNode(wsp.Node):
                     self.switch_state(Status.CLUSTER_HEAD)
                     # self.log(f'Start broadcast CH message')
                     yield self.timeout(BROADCAST_DELAY)
-                    self.send(wsp.BROADCAST_ADDR, msg=Message.I_AM_CLUSTER_HEAD, src=self.id)
+                    self.send_with_battery_included(wsp.BROADCAST_ADDR, msg=Message.I_AM_CLUSTER_HEAD, src=self.id)
         else:
             pass
 
@@ -270,13 +285,13 @@ class MyNode(wsp.Node):
             if min_snr > snr_value[src][gw] + snr_value[gw][chdest]:
                 min_snr = snr_value[src][gw] + snr_value[gw][chdest]
                 best_gw = gw
-        self.send(best_gw, msg=msg, src=src, chdest=chdest, **kwargs)
+        self.send_with_battery_included(best_gw, msg=msg, src=src, chdest=chdest, **kwargs)
 
     def send_data_to_sink(self, msg, src, **kwargs):
         # self.log(f"Forward data from {src} to {SINK_NODE} - seq {kwargs['seq']}")
         old_tx_range = self.tx_range
         self.tx_range = self.distance(self.pos, SINK_POS)
-        self.send(SINK_NODE, msg=msg, src=src, **kwargs)
+        self.send_with_battery_included(SINK_NODE, msg=msg, src=src, **kwargs)
         self.tx_range = old_tx_range
 
     ############################
@@ -309,11 +324,24 @@ class MyNode(wsp.Node):
     def distance(self, p0, p1):
         return math.sqrt((p0[0] - p1[0]) ** 2 + (p0[1] - p1[1]) ** 2)
 
+    def change_pos(self):
+        if self.id is SINK_NODE:
+            return
+        vx = random.uniform(-30, 30)
+        vy = random.uniform(-30, 30)
+        self.move(self.pos[0] + vx, self.pos[1] + vy)
 
+    def clear_link(self):
+        self.scene.clearlinks()
+
+    def send_with_battery_included(self, dst, msg, src, **kwargs):
+        self.pin -= 10
+        self.send(dst, msg=msg, src=src, **kwargs)
+        # self.log(self.pin)
 ###########################################################
 sim = wsp.Simulator(
     until=50,
-    timescale=10,
+    timescale=1,
     visual=True,
     terrain_size=(700, 700),
     title="Cluster based demo")
@@ -330,8 +358,6 @@ for x in range(6):
         px = 60 + x * 100 + random.uniform(-40, 40)
         py = 60 + y * 100 + random.uniform(-40, 40)
         node = sim.add_node(MyNode, (px, py))
-        node.max_range = 500
-        node.min_range = 10
         node.tx_range = 150
         node.pin = random.uniform(700, 1000)
         node.logging = True
