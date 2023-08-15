@@ -1,4 +1,4 @@
 simpy
 wsnsimpy
-matplotlib.pyplot
+matplotlib
 numpy
