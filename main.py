@@ -63,9 +63,9 @@ class MyNode(wsp.Node):
     ###################
     def run(self):
         self.round = 0
-        self.round_time = 4
+        self.round_time = 6
 
-        while self.round < 4:
+        while self.round < 1:
             self.round += 1
             self.complete_round(self.sim.now)
 
@@ -126,8 +126,6 @@ class MyNode(wsp.Node):
             self.data_combine = ''
             yield self.timeout(1)
 
-            self.log(self.route_to_sink)
-
             while seq < 1:
                 seq += 1
                 if len(self.route_to_sink) == 0:
@@ -149,6 +147,8 @@ class MyNode(wsp.Node):
                 seq = kwargs['seq']
                 data = kwargs['data']
                 self.log(f"Got data from {sender} - seq {seq}: {data}")
+                for i in nodes.keys():
+                    print(nodes[i].pin)
             elif msg == 'Cluster information':
                 self.log(f'Receive from {sender}: {kwargs["data"]}')
             elif msg == Message.I_AM_CLUSTER_HEAD:
@@ -290,7 +290,7 @@ class MyNode(wsp.Node):
     def send_data_to_sink(self, msg, src, **kwargs):
         # self.log(f"Forward data from {src} to {SINK_NODE} - seq {kwargs['seq']}")
         old_tx_range = self.tx_range
-        self.tx_range = self.distance(self.pos, SINK_POS)
+        self.tx_range = self.distance(self.id, SINK_NODE)
         self.send_with_battery_included(SINK_NODE, msg=msg, src=src, **kwargs)
         self.tx_range = old_tx_range
 
@@ -305,7 +305,7 @@ class MyNode(wsp.Node):
                 z = z_samples[self.id * distance[1].id]
 
                 if distance[0] < 50:
-                    b = -80 - 26 * math.log10(distance[0]/1000)
+                    b = -80 - 26 * math.log10(50/1000)
                 else:
                     b = -100 - 37.6 * math.log10(distance[0] / 1000) + z
 
@@ -321,7 +321,9 @@ class MyNode(wsp.Node):
             chsv_point *= 10
         return chsv_point
 
-    def distance(self, p0, p1):
+    def distance(self, node0, node1):
+        p0 = nodes[node0].pos
+        p1 = nodes[node1].pos
         return math.sqrt((p0[0] - p1[0]) ** 2 + (p0[1] - p1[1]) ** 2)
 
     def change_pos(self):
@@ -335,13 +337,24 @@ class MyNode(wsp.Node):
         self.scene.clearlinks()
 
     def send_with_battery_included(self, dst, msg, src, **kwargs):
-        self.pin -= 10
+        if dst != wsp.BROADCAST_ADDR:
+            dis = self.distance(dst, src)/1000
+        else:
+            dis = 0.2
+
+        if dis < 0.15:
+            dis = 0.15
+        self.log(dis)
+
+        harvest_enegy = 0.002/dis**2.5
+        self.log(harvest_enegy)
+        self.pin -= harvest_enegy
         self.send(dst, msg=msg, src=src, **kwargs)
         # self.log(self.pin)
 ###########################################################
 sim = wsp.Simulator(
     until=50,
-    timescale=1,
+    timescale=3,
     visual=True,
     terrain_size=(700, 700),
     title="Cluster based demo")
@@ -352,14 +365,50 @@ sim.scene.linestyle("GW", color=(1, 0, 1), width=2, arrow='both')
 sim.scene.linestyle("SINK", color=(0, 1, 1), width=2, arrow='both')
 
 nodes = {}
-
+pins = [7.958022187901586,
+7.728715611988336,
+8.99376941012509,
+5.774724344579587,
+8.408235973843254,
+7.9580221879015856,
+6.879714569895031,
+6.994752231804542,
+5.203900697265199,
+7.466256672209076,
+5.259413456231651,
+6.394312035620076,
+5.677279031585699,
+7.728512063681889,
+6.171994405520449,
+3.826839951947006,
+6.153035734613469,
+7.9580221879015856,
+6.948327123090269,
+1.6435421086250077,
+6.8055873536945315,
+8.99376941012509,
+7.958022187901586,
+8.99376941012509,
+6.463254717238685,
+7.081606619390243,
+6.580961442583395,
+7.03998169102279,
+8.07503224233945,
+8.607261571801217,
+7.400395144524235,
+5.086193971920492,
+7.023782349815842,
+6.463254717238687,
+8.040891711219373,
+5.197997370795482
+]
 for x in range(6):
     for y in range(6):
         px = 60 + x * 100 + random.uniform(-40, 40)
         py = 60 + y * 100 + random.uniform(-40, 40)
         node = sim.add_node(MyNode, (px, py))
         node.tx_range = 150
-        node.pin = random.uniform(700, 1000)
+        node.pin = pins[x*6+y]
         node.logging = True
 
         nodes[node.id] = node
@@ -370,6 +419,8 @@ SINK_POS = (610, 610)
 sink_node = sim.add_node(MyNode, SINK_POS)
 sink_node.tx_range = 150
 sink_node.logging = True
+
+nodes[SINK_NODE] = sink_node
 
 z_samples = np.random.normal(0, 7, 36*36)
 snr_value = np.zeros((37, 37))
