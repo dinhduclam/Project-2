@@ -63,7 +63,7 @@ class MyNode(wsp.Node):
     ###################
     def run(self):
         self.round = 0
-        self.round_time = 6
+        self.round_time = 150
 
         while self.round < 1:
             self.round += 1
@@ -76,10 +76,9 @@ class MyNode(wsp.Node):
         self.sim.env.process(self.start_round(start_time))
         self.sim.env.run(until= start_time + self.round_time)
         self.switch_state(Status.UNDEFINED)
-        self.change_pos()
+        # self.change_pos()
 
     def start_round(self, start_time):
-        self.log(self.round)
         if self.id is SINK_NODE:
             self.scene.nodecolor(self.id, 0, 0, 0)
             self.scene.nodewidth(self.id, 2)
@@ -125,6 +124,7 @@ class MyNode(wsp.Node):
             seq = 0
             self.data_combine = ''
             yield self.timeout(1)
+            self.log(f'Cluster adjacency {self.cluster_adjacency}')
 
             while seq < 1:
                 seq += 1
@@ -344,16 +344,14 @@ class MyNode(wsp.Node):
 
         if dis < 0.15:
             dis = 0.15
-        self.log(dis)
 
         harvest_enegy = 0.002/dis**2.5
-        self.log(harvest_enegy)
         self.pin -= harvest_enegy
         self.send(dst, msg=msg, src=src, **kwargs)
         # self.log(self.pin)
 ###########################################################
 sim = wsp.Simulator(
-    until=50,
+    until=150,
     timescale=3,
     visual=True,
     terrain_size=(700, 700),
